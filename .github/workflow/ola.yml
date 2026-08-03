@@ -1,0 +1,21 @@
+name: Ola Workflow
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v2
+
+      - name: Exibir mensagem
+        run: echo "Olá, este é o workflow do GitHub Actions!"
+      
+      - name: Mostrar data
+        run: date
+
+      - name: Listar arquivos
+        run: ls -la
