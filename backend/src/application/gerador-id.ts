@@ -1,0 +1,1 @@
+export type GeradorId = () => string;
