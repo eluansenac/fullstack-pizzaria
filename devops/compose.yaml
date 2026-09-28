@@ -24,11 +24,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-pizzaria}
-      POSTGRES_USER: ${POSTGRES_USER:-pizzaria}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Copie .env.example para .env e configure a senha}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pizzaria}:${POSTGRES_PASSWORD:?Copie .env.example para .env e configure a senha}@postgres:5432/${POSTGRES_DB:-pizzaria}
     ports:
       - "127.0.0.1:${BACKEND_PORT:-3000}:3000"
     depends_on:

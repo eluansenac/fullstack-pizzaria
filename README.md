@@ -1,6 +1,6 @@
-# Pizzaria — DDD em TypeScript
+# Categorias — NestJS + Prisma + PostgreSQL
 
-O backend aplica Domain-Driven Design ao fluxo de uma pizzaria: cadastrar clientes e pizzas, realizar pedidos, acompanhar o preparo e concluir a entrega ou retirada. A API HTTP usa NestJS e PostgreSQL, com frontend Vue servido pelo NGINX. A demonstração de terminal continua disponível com armazenamento em memória.
+API mínima para cadastro de categorias, usada como exemplo de ORM com [Prisma](https://www.prisma.io) sobre NestJS e PostgreSQL, com frontend Vue servido pelo NGINX.
 
 ## Executar
 
@@ -14,98 +14,64 @@ docker compose up -d --build --wait
 
 Acesse http://localhost:8080 e verifique a conexão em http://localhost:8080/api/health. Configuração, rotas, exemplos e desenvolvimento local estão em [devops/README.md](devops/README.md).
 
-Para executar somente a demonstração de terminal, com Node.js 24 ou superior e npm:
+Para rodar só o backend, com Node.js 24 ou superior, npm e um PostgreSQL acessível:
 
 ```bash
 cd backend
+cp .env.example .env   # ajuste DATABASE_URL se necessário
 npm ci
-npm run demo
+npm run prisma:migrate # cria a tabela categorias e gera o Prisma Client
+npm run prisma:seed    # cadastra categorias de exemplo (opcional)
+npm run dev
 ```
-
-A demonstração cadastra Maria e uma Margherita grande, realiza um pedido de duas pizzas de R$ 45,90 e percorre o fluxo até a entrega, imprimindo o total de R$ 91,80.
 
 ```bash
-npm test
 npm run typecheck
 npm run build
-# npm start inicia a API e requer as variáveis de PostgreSQL configuradas.
+npm start
 ```
 
-## Modelo de domínio
+## Modelo de dados
 
-O domínio está organizado em três módulos dentro do mesmo backend. São limites iniciais de responsabilidade, sem necessidade de microsserviços:
+Um único model, `Categoria` (`backend/prisma/schema.prisma`):
 
-| Módulo | Responsabilidade | Raiz de agregado |
+| Campo | Tipo | Observação |
 | --- | --- | --- |
-| Clientes | Identificação e contato do cliente | `Cliente` |
-| Cardápio | Sabor, tamanho, preço e disponibilidade | `Pizza` |
-| Pedidos | Itens comprados, atendimento, total e ciclo de vida | `Pedido` |
+| `id` | UUID | Gerado automaticamente |
+| `nome` | texto | Único |
+| `criadaEm` | timestamp | Preenchido na criação |
 
-`Pedido` é o núcleo desta implementação. Referencia o cliente por ID e contém seus `ItemPedido`, que não possuem repositório próprio. Cada item registra o ID, nome, tamanho e preço da pizza no momento da compra, preservando o histórico quando o cardápio muda. O caso de uso `RealizarPedido` coordena a consulta aos módulos de Clientes e Cardápio antes de salvar o agregado completo.
+## API
 
-`Dinheiro` e `Endereco` são objetos de valor: não têm identidade própria, são imutáveis e oferecem comparação por conteúdo. `ItemPedido` também é um objeto de valor imutável, sem identidade independente. Clientes, pizzas e pedidos têm identidade e são agregados imutáveis: operações como `alterarPreco` e `alterarStatus` retornam uma nova versão, que deve ser salva pelo caso de uso.
+| Método | Rota | Função |
+| --- | --- | --- |
+| GET | `/api/health/live` | Verificar se o servidor está ativo |
+| GET | `/api/health` | Verificar conexão com PostgreSQL; retorna 503 quando indisponível |
+| POST | `/api/categorias` | Cadastrar categoria |
+| GET | `/api/categorias` | Listar categorias |
+| GET | `/api/categorias/:id` | Buscar categoria por id |
+| DELETE | `/api/categorias/:id` | Remover categoria |
 
-A linguagem usada no código corresponde ao negócio: cliente, pizza, tamanho, pedido, item, entrega, retirada e preparo. Nesta versão, cada sabor/tamanho corresponde a uma pizza distinta do cardápio; `entregue` significa tanto entrega ao endereço quanto retirada concluída.
+Nome duplicado retorna 409; id inexistente ou fora do formato UUID retorna 404/400; payload inválido retorna 400.
 
-## Regras implementadas
-
-- Cliente deve ter nome e telefone com DDD; pizza deve ter tamanho válido e preço positivo.
-- Pedido exige cliente cadastrado e pelo menos um item de pizza existente e disponível.
-- Quantidades são inteiros positivos. Preços vêm do cardápio e são expressos em centavos de BRL, com validação de inteiros seguros.
-- O total é calculado pelos itens; quem solicita o pedido não informa preços ou total.
-- Entrega exige rua, número, bairro e cidade. Retirada não exige endereço.
-- O cancelamento só é permitido enquanto o pedido está recebido.
-- Itens e valores ficam fixos após a criação do pedido.
-
-```mermaid
-stateDiagram-v2
-    [*] --> recebido
-    recebido --> em_preparo
-    recebido --> cancelado
-    em_preparo --> pronto
-    pronto --> entregue
-    entregue --> [*]
-    cancelado --> [*]
-```
-
-## Organização e dependências
+## Organização
 
 ```text
 backend/
+  prisma/
+    schema.prisma      Model Categoria e datasource PostgreSQL
+    migrations/         Migrações versionadas do Prisma
+    seed.ts             Categorias de exemplo
   src/
-    domain/
-      clientes/         Cliente e contrato do repositório
-      cardapio/         Pizza e contrato do repositório
-      pedidos/          Pedido, ItemPedido, Endereco e contrato do repositório
-      shared/           Dinheiro e erros de domínio
-    application/        CadastrarCliente, CadastrarPizza, RealizarPedido,
-                        ConsultarPedido e AlterarStatusPedido
-    infrastructure/
-      database/         Conexão PostgreSQL e migrações versionadas
-      repositories/     Implementações em memória e PostgreSQL
-    http/               Controllers, DTOs e tratamento de erros
-    app.module.ts       Composição do NestJS com PostgreSQL
-    main.ts             Servidor HTTP
-    composition-root.ts Instancia e conecta as dependências
-    index.ts            Demonstração no terminal
-  test/                 Regras de domínio e integração dos casos de uso
-```
-
-O domínio não depende de framework, banco de dados ou Node.js. A aplicação depende do domínio e dos contratos de repositório. A infraestrutura implementa esses contratos. A composição injeta repositórios e o gerador de IDs nos casos de uso. O módulo NestJS escolhe os repositórios PostgreSQL; a demonstração e os testes de domínio usam memória.
-
-Os testes verificam cálculos monetários, validações, transições de status, proteção dos itens, preservação do preço histórico, ausência de gravação em operações rejeitadas e o fluxo completo dos casos de uso.
-
-## Exemplo com Prisma
-
-`backend/prisma/schema.prisma` contém um exemplo isolado de uso do [Prisma](https://www.prisma.io) como ORM, com um model `Categoria`, independente do restante do backend (que usa o cliente `pg` diretamente). A classe `CategoriaRepositoryPrisma` em `backend/src/infrastructure/repositories/categoria-prisma.ts` demonstra criar, listar, buscar e remover categorias. Para experimentar:
-
-```bash
-cd backend
-cp .env.example .env   # preencha DATABASE_URL com um PostgreSQL acessível
-npm run prisma:migrate # cria a tabela categorias
-npm run prisma:generate
+    prisma/             PrismaService/PrismaModule (conexão compartilhada)
+    categorias/         Controller, service e DTO de Categoria
+    health.controller.ts Rotas de saúde
+    app.module.ts       Composição do NestJS
+    app.ts               Bootstrap do Nest (prefixo /api, validação global)
+    main.ts               Servidor HTTP
+  prisma.config.ts      Configuração do Prisma CLI (schema, seed)
 ```
 
 ## Escopo
 
-Na API, os dados persistem no PostgreSQL e no volume Docker. Pedidos são gravados atomicamente com seus itens; alterações de status verificam o estado anterior para impedir gravações concorrentes conflitantes. A demonstração de terminal continua descartando os dados ao encerrar. Pagamentos, estoque, taxas de entrega, pizzas meio a meio e autenticação não fazem parte desta implementação. O frontend em `devops/` verifica a conexão com a API e o banco.
+Os dados persistem no PostgreSQL e no volume Docker. O container do backend roda `prisma migrate deploy` automaticamente ao iniciar. Autenticação e paginação não fazem parte desta implementação. O frontend em `devops/` verifica a conexão com a API e o banco.
