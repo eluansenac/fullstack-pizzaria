@@ -75,6 +75,17 @@ stringData:
   DATABASE_URL: postgresql://pizzaria:pizzaria_local@postgres:5432/pizzaria
 ---
 apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-secret
+  namespace: default
+type: Opaque
+stringData:
+  ADMIN_EMAIL: admin@pizzaria.com
+  ADMIN_PASSWORD: admin
+  JWT_SECRET: chavedoeluanjwt
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: postgres-data
@@ -154,8 +165,10 @@ spec:
     spec:
       containers:
       - name: backend
-        # Construa a imagem a partir de backend/Dockerfile e publique em um registry acessível ao cluster.
+        # Construa a imagem a partir de backend/Dockerfile e publique em um registry acessível ao cluster
+        # (em kind, use `kind load docker-image backend:latest --name <cluster>` em vez de um registry).
         image: backend:latest
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000
         env:
@@ -166,6 +179,9 @@ spec:
             secretKeyRef:
               name: postgres-secret
               key: DATABASE_URL
+        envFrom:
+        - secretRef:
+            name: backend-secret
         readinessProbe:
           httpGet:
             path: /api/health/live

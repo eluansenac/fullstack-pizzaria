@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Perfis } from '../auth/perfis.decorator.js';
 import { CriarCategoriaDto } from './categoria.dto.js';
 import { CategoriaService } from './categoria.service.js';
 
@@ -6,6 +7,7 @@ import { CategoriaService } from './categoria.service.js';
 export class CategoriaController {
   constructor(private readonly categorias: CategoriaService) {}
 
+  @Perfis('ADMIN')
   @Post()
   criar(@Body() dados: CriarCategoriaDto) {
     return this.categorias.criar(dados);
@@ -21,6 +23,7 @@ export class CategoriaController {
     return this.categorias.buscarPorId(id);
   }
 
+  @Perfis('ADMIN')
   @Delete(':id')
   @HttpCode(204)
   async remover(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
