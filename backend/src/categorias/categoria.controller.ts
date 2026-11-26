@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { Perfis } from '../auth/perfis.decorator.js';
+import { Public } from '../auth/public.decorator.js';
 import { CriarCategoriaDto } from './categoria.dto.js';
 import { CategoriaService } from './categoria.service.js';
 
@@ -13,6 +14,7 @@ export class CategoriaController {
     return this.categorias.criar(dados);
   }
 
+  @Public()
   @Get()
   listar() {
     return this.categorias.listar();
