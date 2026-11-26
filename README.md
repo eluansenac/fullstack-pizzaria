@@ -1,77 +1,167 @@
-# Categorias — NestJS + Prisma + PostgreSQL
+# Pizzaria — categorias
 
-API mínima para cadastro de categorias, usada como exemplo de ORM com [Prisma](https://www.prisma.io) sobre NestJS e PostgreSQL, com frontend Vue servido pelo NGINX.
+API em NestJS + Prisma + PostgreSQL, com frontend em Vue.
 
-## Executar
+| Pasta | Conteúdo |
+| --- | --- |
+| `backend/` | API e banco (Prisma) |
+| `frontend/` | Tela que lista as categorias |
+| `devops/` | Docker Compose, manifesto Kubernetes e página de status |
 
-Para subir a stack completa com Docker:
+**Requisitos:** Docker com Compose e Node.js 24. Para Kubernetes, também `kind` e `kubectl`.
+
+Todos os comandos partem da **raiz do projeto**.
+
+## 1. Subir com Docker Compose
 
 ```bash
 cd devops
-cp .env.example .env
+cp -n .env.example .env
 docker compose up -d --build --wait
+curl http://localhost:8080/api/health
+cd ..
 ```
 
-Acesse http://localhost:8080 e verifique a conexão em http://localhost:8080/api/health. Configuração, rotas, exemplos e desenvolvimento local estão em [devops/README.md](devops/README.md).
+Resposta esperada: `{"status":"ok","database":"up"}`.
 
-Para rodar só o backend, com Node.js 24 ou superior, npm e um PostgreSQL acessível:
+| Serviço | Endereço |
+| --- | --- |
+| Página de status | http://localhost:8080 |
+| API | http://localhost:3000/api |
+| PostgreSQL | `localhost:5432` |
+
+## 2. Criar o administrador e as categorias
+
+Com o banco no ar na porta 5432:
 
 ```bash
 cd backend
-cp .env.example .env   # ajuste DATABASE_URL se necessário
+nvm install 24
+cp -n .env.example .env
 npm ci
-npm run prisma:migrate # cria a tabela categorias e gera o Prisma Client
-npm run prisma:seed    # cadastra categorias de exemplo (opcional)
+npm run prisma:generate
+npm run prisma:seed
+cd ..
+```
+
+O login do administrador usa `ADMIN_EMAIL` e `ADMIN_PASSWORD` de `backend/.env`.
+
+## 3. Desenvolver
+
+Terminal 1, banco e API:
+
+```bash
+cd devops
+cp -n .env.example .env
+docker compose stop backend web
+docker compose up -d --wait postgres
+cd ../backend
+nvm install 24
+cp -n .env.example .env
+npm ci
+npm run prisma:generate
+npm run prisma:deploy
 npm run dev
 ```
 
+Terminal 2, frontend:
+
 ```bash
-npm run typecheck
-npm run build
-npm start
+cd frontend
+nvm use 24
+npm ci
+npm run dev
 ```
 
-## Modelo de dados
+Acesse http://localhost:5173.
 
-Um único model, `Categoria` (`backend/prisma/schema.prisma`):
+Depois de alterar `backend/prisma/schema.prisma`, crie a migração (em `backend/`):
 
-| Campo | Tipo | Observação |
-| --- | --- | --- |
-| `id` | UUID | Gerado automaticamente |
-| `nome` | texto | Único |
-| `criadaEm` | timestamp | Preenchido na criação |
+```bash
+npm run prisma:migrate
+```
+
+## 4. Subir no Kubernetes (kind)
+
+Antes, libere as portas usadas pelo Compose:
+
+```bash
+docker compose -f devops/compose.yaml down
+```
+
+Crie o cluster (só na primeira vez):
+
+```bash
+kind create cluster --name hpa
+```
+
+Se o cluster já existe mas está parado: `docker start hpa-control-plane`.
+
+Publique a imagem e aplique o manifesto:
+
+```bash
+kubectl config use-context kind-hpa
+docker build -t backend:latest ./backend
+kind load docker-image backend:latest --name hpa
+kubectl apply -f devops/deployment.yaml
+kubectl rollout restart deployment/backend
+kubectl rollout status deployment/postgres --timeout=180s
+kubectl rollout status deployment/backend --timeout=180s
+```
+
+Exponha a API e o banco, cada comando em um terminal:
+
+```bash
+kubectl port-forward svc/backend 3000:3000
+```
+
+```bash
+kubectl port-forward svc/postgres 5432:5432
+```
+
+Com os dois abertos, siga a [etapa 2](#2-criar-o-administrador-e-as-categorias) para cadastrar os dados.
+
+O deployment `web` do manifesto é um NGINX de exemplo; para ver a tela, rode o frontend (terminal 2 da etapa 3).
 
 ## API
 
-| Método | Rota | Função |
+| Método | Rota | Acesso |
 | --- | --- | --- |
-| GET | `/api/health/live` | Verificar se o servidor está ativo |
-| GET | `/api/health` | Verificar conexão com PostgreSQL; retorna 503 quando indisponível |
-| POST | `/api/categorias` | Cadastrar categoria |
-| GET | `/api/categorias` | Listar categorias |
-| GET | `/api/categorias/:id` | Buscar categoria por id |
-| DELETE | `/api/categorias/:id` | Remover categoria |
+| GET | `/api/health/live` | Público |
+| GET | `/api/health` | Público |
+| POST | `/api/auth/registrar` | Público (cria um cliente) |
+| POST | `/api/auth/login` | Público |
+| GET | `/api/auth/me` | Com token |
+| GET | `/api/categorias` | Público |
+| GET | `/api/categorias/:id` | Com token |
+| POST | `/api/categorias` | Administrador |
+| DELETE | `/api/categorias/:id` | Administrador |
 
-Nome duplicado retorna 409; id inexistente ou fora do formato UUID retorna 404/400; payload inválido retorna 400.
+Para criar uma categoria, troque `SUA_SENHA` pela senha do administrador:
 
-## Organização
+```bash
+TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@pizzaria.com","senha":"SUA_SENHA"}' \
+  | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
 
-```text
-backend/
-  prisma/
-    schema.prisma      Model Categoria e datasource PostgreSQL
-    migrations/         Migrações versionadas do Prisma
-    seed.ts             Categorias de exemplo
-  src/
-    prisma/             PrismaService/PrismaModule (conexão compartilhada)
-    categorias/         Controller, service e DTO de Categoria
-    health.controller.ts Rotas de saúde
-    app.module.ts       Composição do NestJS
-    app.ts               Bootstrap do Nest (prefixo /api, validação global)
-    main.ts               Servidor HTTP
-  prisma.config.ts      Configuração do Prisma CLI (schema, seed)
+curl -X POST http://localhost:3000/api/categorias \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"nome":"Calzones"}'
 ```
 
-## Escopo
+O token vale por 1 hora.
 
-Os dados persistem no PostgreSQL e no volume Docker. O container do backend roda `prisma migrate deploy` automaticamente ao iniciar. Autenticação e paginação não fazem parte desta implementação. O frontend em `devops/` verifica a conexão com a API e o banco.
+## Logs e parada
+
+| Ação | Docker Compose (em `devops/`) | Kubernetes |
+| --- | --- | --- |
+| Ver logs | `docker compose logs -f backend` | `kubectl logs -f deploy/backend` |
+| Abrir o banco | `docker compose exec postgres psql -U pizzaria -d pizzaria` | `kubectl exec -it deploy/postgres -- psql -U pizzaria -d pizzaria` |
+| Parar sem apagar dados | `docker compose down` | `kubectl scale deployment/postgres deployment/backend --replicas=0` |
+| Voltar | `docker compose up -d --wait` | `kubectl scale deployment/postgres deployment/backend --replicas=1` |
+
+**Apagam os dados:** `docker compose down -v` e `kubectl delete -f devops/deployment.yaml`.
+
+As senhas dos arquivos de exemplo e do manifesto servem apenas para desenvolvimento local.
